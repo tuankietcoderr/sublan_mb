@@ -1,5 +1,5 @@
 class AppUtils {
-  static const rootUrl = 'https://c4bf-27-77-242-19.ngrok-free.app';
+  static const rootUrl = 'https://b77f-113-22-33-38.ngrok-free.app';
   static const downloadSubtitle = '$rootUrl/download-subtitle-by-file';
   static const getSubtitle = '$rootUrl/get-subtitles-file';
   static const youtubeToMp3 = '$rootUrl/youtube-to-mp3';

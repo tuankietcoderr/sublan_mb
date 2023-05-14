@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sublan/core/app_colors.dart';
 
 Future<String?> showBottomModal(context,
-    {required controller, double height = 800}) {
+    {required controller, double height = 1000}) {
   void submit() {
     Navigator.of(context).pop(controller.text);
   }

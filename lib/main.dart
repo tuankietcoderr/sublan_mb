@@ -2,7 +2,7 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:avatar_glow/avatar_glow.dart';
 import 'package:flutter/material.dart';
 import 'package:sublan/core/app_colors.dart';
@@ -13,6 +13,8 @@ import 'package:sublan/core/values/app_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:sublan/countries.dart';
+import 'package:sublan/formatter.dart';
+import 'package:sublan/model.dart';
 import 'package:sublan/widget.dart' as wg;
 
 void main() {
@@ -62,19 +64,28 @@ class _MyHomePageState extends State<MyHomePage> {
   late String url = "";
   late String rawText = "";
   late String transcriptText = "";
-  late bool showAsRawText = true;
+  late List<Transcript> transcribeArr = [];
+  late bool showAsRawText = false;
   late String language = "";
   Choice _selectedChoice = choices[0];
   late TextEditingController _controller;
   late String youtubeURL = "";
   final int _end = 600;
 
+  final audioPlayer = AudioPlayer();
+  bool isPlaying = false;
+  Duration duration = Duration.zero;
+  Duration position = Duration.zero;
+  final ScrollController _scrollController = ScrollController();
+
   Future<String> _chooseFile() async {
+    audioPlayer.stop();
     onRefresh();
     final result = await FilePicker.platform.pickFiles(type: FileType.audio);
 
     if (result == null) return Future.error("No file selected");
     final path = result.files.single.path!;
+    audioPlayer.setSourceDeviceFile(path);
     setState(() {
       file = result.files.single;
     });
@@ -131,9 +142,11 @@ class _MyHomePageState extends State<MyHomePage> {
               rawText = tmp["text"];
               transcriptText = tmp["transcribe"];
               language = findNameByCode(lang);
+              transcribeArr =
+                  fromTranscribeArrrJsonToTranscribeList(tmp["transcribe_arr"]);
             });
           } else {
-            print("Upload Failed!");
+            throw Exception("Failed to upload");
           }
         })
         .catchError((e) {
@@ -149,7 +162,6 @@ class _MyHomePageState extends State<MyHomePage> {
         })
         .whenComplete(() => setState(() {
               downloading = false;
-              FilePicker.platform.clearTemporaryFiles();
             }))
         .ignore();
   }
@@ -179,11 +191,12 @@ class _MyHomePageState extends State<MyHomePage> {
         setState(() {
           rawText = tmp["text"];
           transcriptText = tmp["transcribe"];
-          print(tmp["language"]);
           language = findNameByCode(tmp["language"]);
+          transcribeArr =
+              fromTranscribeArrrJsonToTranscribeList(tmp["transcribe_arr"]);
         });
       } else {
-        print("Upload Failed!");
+        throw Exception("Upload failed!");
       }
     }).catchError((e) {
       print(e);
@@ -206,6 +219,7 @@ class _MyHomePageState extends State<MyHomePage> {
       downloading = true;
       rawText = "";
       transcriptText = "";
+      transcribeArr = [];
       language = "";
       file = PlatformFile(path: null, name: "", size: 0);
     });
@@ -235,19 +249,11 @@ class _MyHomePageState extends State<MyHomePage> {
             backgroundColor: AppColors.success,
             textColor: AppColors.onSuccess,
             fontSize: 16.0);
+        audioPlayer
+            .setSourceUrl("${AppUtils.rootUrl}/files/youtube_download.mp3");
       } else {
-        print("Upload Failed!");
+        throw Exception("Upload failed");
       }
-    }).catchError((e) {
-      Fluttertoast.showToast(
-          msg: "Error occured. Try again!",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.CENTER,
-          timeInSecForIosWeb: 1,
-          backgroundColor: Colors.red,
-          textColor: AppColors.onPrimary,
-          fontSize: 16.0);
-      onRefresh();
     }).then((value) async {
       Fluttertoast.showToast(
           msg: "Generating...",
@@ -258,6 +264,16 @@ class _MyHomePageState extends State<MyHomePage> {
           textColor: AppColors.onPrimary,
           fontSize: 16.0);
       await getSubtitleFromAudioUploadedByYoutube();
+    }).catchError((e) {
+      Fluttertoast.showToast(
+          msg: "Error occured. Try again!",
+          toastLength: Toast.LENGTH_SHORT,
+          gravity: ToastGravity.CENTER,
+          timeInSecForIosWeb: 1,
+          backgroundColor: Colors.red,
+          textColor: AppColors.onPrimary,
+          fontSize: 16.0);
+      onRefresh();
     });
   }
 
@@ -292,18 +308,23 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void onRefresh() async {
-    bool canClearTemp =
-        await FilePicker.platform.clearTemporaryFiles() ?? false;
-    if (canClearTemp) {
-      print("Temporary files cleared");
-    }
+    // bool canClearTemp =
+    //     await FilePicker.platform.clearTemporaryFiles() ?? false;
+    // if (canClearTemp) {
+    //   print("Temporary files cleared");
+    // }
     setState(() {
       rawText = "";
       transcriptText = "";
+      transcribeArr = [];
       file = PlatformFile(path: null, name: "", size: 0);
       downloading = false;
       youtubeURL = "";
       language = "";
+      duration = Duration.zero;
+      position = Duration.zero;
+      isPlaying = false;
+      audioPlayer.stop();
     });
   }
 
@@ -340,11 +361,42 @@ class _MyHomePageState extends State<MyHomePage> {
     _controller = TextEditingController();
     loadJson();
     super.initState();
+    audioPlayer.onPlayerStateChanged.listen((event) {
+      setState(() {
+        isPlaying = event == PlayerState.playing;
+      });
+    });
+
+    audioPlayer.onDurationChanged.listen((event) {
+      setState(() {
+        duration = event;
+      });
+    });
+
+    audioPlayer.onPositionChanged.listen((event) {
+      setState(() {
+        position = event;
+      });
+    });
+
+    audioPlayer.onPlayerComplete.listen((event) {
+      setState(() {
+        position = Duration.zero;
+        audioPlayer.audioCache.clearAll();
+      });
+      if (file.path != null) {
+        audioPlayer.setSourceDeviceFile(file.path!);
+      } else {
+        audioPlayer
+            .setSourceUrl("${AppUtils.rootUrl}/files/youtube_download.mp3");
+      }
+    });
   }
 
   void dispose() {
     FilePicker.platform.clearTemporaryFiles();
     _controller.dispose();
+    audioPlayer.dispose();
     super.dispose();
   }
 
@@ -379,7 +431,11 @@ class _MyHomePageState extends State<MyHomePage> {
             rawText != "" || transcriptText != ""
                 ? IconButton(
                     icon: const Icon(Icons.refresh_outlined),
-                    onPressed: onRefresh,
+                    onPressed: () {
+                      onRefresh();
+                      FilePicker.platform.clearTemporaryFiles();
+                      audioPlayer.stop();
+                    },
                     color: Colors.black,
                     tooltip: "Refresh",
                   )
@@ -414,8 +470,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 : Container(),
           ]),
       body: SingleChildScrollView(
+          controller: _scrollController,
           child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.only(
+                  top: 20, left: 20, right: 20, bottom: 200),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
@@ -455,7 +513,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       ? Column(children: [
                           const CircularProgressIndicator(),
                           Text(
-                            "Please wait...We are generating subtitles for you",
+                            "Please wait...We are generating subtitles for you. You can play the audio you upload and grab a coffee ☕😉",
                             style: CustomTextStyle.normal(color: Colors.black),
                             textAlign: TextAlign.center,
                           ),
@@ -466,7 +524,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           ),
                           Text(
                             choices.indexOf(_selectedChoice) > 1
-                                ? "Higher accuracy can take more time (up to 10 minutes) to generate subtitles. Let's wait for it and enjoy your coffee ☕😉"
+                                ? "Higher accuracy can take more time (up to 10 minutes) to generate subtitles."
                                 : "",
                             style: CustomTextStyle.normal(color: Colors.black),
                             textAlign: TextAlign.center,
@@ -487,53 +545,155 @@ class _MyHomePageState extends State<MyHomePage> {
                   const SizedBox(
                     height: 20,
                   ),
-                  Text(
-                    showAsRawText ? rawText : transcriptText,
-                    style: CustomTextStyle.large(color: Colors.black),
-                  ),
+                  showAsRawText
+                      ? Text(
+                          rawText,
+                          style: CustomTextStyle.large(color: Colors.black),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: transcribeArr.map(
+                            (e) {
+                              bool isActive = position.inSeconds >= e.startAt &&
+                                  position.inSeconds <= e.endAt - 0.1;
+                              var index = transcribeArr.indexOf(e);
+
+                              return InkWell(
+                                  onTap: () async {
+                                    Duration seekTo =
+                                        Duration(seconds: (e.startAt).toInt());
+                                    await audioPlayer.seek(seekTo);
+                                    await audioPlayer.resume();
+                                  },
+                                  child: Container(
+                                      padding: EdgeInsets.all(5),
+                                      width: double.infinity,
+                                      color: isActive
+                                          ? AppColors.tertiary.withOpacity(0.5)
+                                          : Colors.transparent,
+                                      child: Text(
+                                        e.toString(),
+                                        style: !isActive
+                                            ? CustomTextStyle.large(
+                                                color: Colors.black)
+                                            : CustomTextStyle.bodyBold(
+                                                color: Colors.black),
+                                      )));
+                            },
+                          ).toList(),
+                        ),
                 ],
               ))),
-      floatingActionButton: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          AvatarGlow(
-              endRadius: 75.0,
-              glowColor: downloading ? AppColors.onInfo : AppColors.tertiary,
-              child: FloatingActionButton(
-                tooltip: "Upload from Youtube",
-                onPressed: () async {
-                  if (downloading) return;
-                  final name = await wg.showBottomModal(context,
-                      controller: _controller);
-                  if (name == null) return;
-                  setState(() {
-                    youtubeURL = name;
-                  });
-                  await uploadYoutubeByUrl();
-                },
-                backgroundColor:
-                    downloading ? AppColors.onInfo : AppColors.onPrimary,
-                child: Icon(
-                  Icons.link_outlined,
-                  color: downloading ? AppColors.info : AppColors.primary,
-                ),
-              )),
-          AvatarGlow(
-              endRadius: 75.0,
-              glowColor: downloading ? AppColors.onInfo : AppColors.primary,
-              child: FloatingActionButton(
-                tooltip: "Upload your audio file",
-                onPressed: () async {
-                  if (downloading) return;
-                  await uploadAudio();
-                },
-                backgroundColor:
-                    downloading ? AppColors.onInfo : AppColors.primary,
-                child: Icon(
-                  Icons.file_upload_outlined,
-                  color: downloading ? AppColors.info : AppColors.onPrimary,
-                ),
-              ))
+          Column(
+            // mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              AvatarGlow(
+                  endRadius: 40,
+                  glowColor:
+                      downloading ? AppColors.onInfo : AppColors.tertiary,
+                  child: FloatingActionButton(
+                    mini: file.path != null,
+                    tooltip: "Upload from Youtube",
+                    onPressed: () async {
+                      if (downloading) return;
+                      final name = await wg.showBottomModal(context,
+                          controller: _controller);
+                      if (name == null) return;
+                      setState(() {
+                        youtubeURL = name;
+                      });
+                      await uploadYoutubeByUrl();
+                    },
+                    backgroundColor:
+                        downloading ? AppColors.onInfo : AppColors.onPrimary,
+                    child: Icon(
+                      Icons.link_outlined,
+                      color: downloading ? AppColors.info : AppColors.primary,
+                      size: 18,
+                    ),
+                  )),
+              AvatarGlow(
+                  endRadius: 40,
+                  glowColor: downloading ? AppColors.onInfo : AppColors.primary,
+                  child: FloatingActionButton(
+                    tooltip: "Upload your audio file",
+                    mini: file.path != null,
+                    onPressed: () async {
+                      if (downloading) return;
+                      await uploadAudio();
+                    },
+                    backgroundColor:
+                        downloading ? AppColors.onInfo : AppColors.primary,
+                    child: Icon(
+                      Icons.file_upload_outlined,
+                      color: downloading ? AppColors.info : AppColors.onPrimary,
+                      size: 18,
+                    ),
+                  ))
+            ],
+          ),
+          audioPlayer.source != null
+              ? Container(
+                  padding: const EdgeInsets.only(bottom: 20),
+                  decoration: const BoxDecoration(
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.onPrimary,
+                        spreadRadius: 2,
+                        blurRadius: 30,
+                        offset: Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Slider(
+                        min: 0,
+                        max: duration.inSeconds.toDouble(),
+                        value: position.inSeconds.toDouble(),
+                        onChanged: (value) async {
+                          final position = Duration(seconds: value.toInt());
+                          await audioPlayer.seek(position);
+                          // await audioPlayer.resume();
+                        },
+                        thumbColor: AppColors.primary,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 20, right: 20),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(formatTime(position)),
+                            Text(formatTime(duration - position)),
+                          ],
+                        ),
+                      ),
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: AppColors.onPrimary,
+                        child: IconButton(
+                          icon:
+                              Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                          iconSize: 24,
+                          onPressed: () async {
+                            if (isPlaying) {
+                              await audioPlayer.pause();
+                            } else {
+                              await audioPlayer.resume();
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Container(),
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation

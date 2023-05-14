@@ -39,6 +39,7 @@ dependencies:
   avatar_glow: ^2.0.2
   file_picker: ^5.2.7
   fluttertoast: ^8.2.1
+  audioplayers: ^4.0.1
 
 dev_dependencies:
   flutter_test:
