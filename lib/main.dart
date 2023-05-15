@@ -404,9 +404,9 @@ class _MyHomePageState extends State<MyHomePage> {
     bool isShow = rawText != "" || transcriptText != "";
     return Scaffold(
       appBar: AppBar(
-          title: const Text("SubLan"),
+          title: const Text("SubAu"),
           titleTextStyle: CustomTextStyle.custom(
-              color: Colors.black, size: 30, fontWeight: FontWeight.w600),
+              color: AppColors.primary, size: 30, fontWeight: FontWeight.w600),
           backgroundColor: Colors.white,
           elevation: 0,
           actions: [
